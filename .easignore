@@ -1,0 +1,30 @@
+# System files
+. DS_Store
+*. log
+*.tmp
+
+# User Library files
+/Users/*/Library/**
+~/Library/**
+
+# Node modules (already excluded but ensure)
+node_modules/**
+
+# Build artifacts
+. expo/**
+. expo-shared/**
+dist/**
+build/**
+
+# IDE
+.vscode/**
+.idea/**
+
+# macOS
+**/. DS_Store
+**/Thumbs.db
+
+# Temp files
+*.swp
+*.swo
+*~
