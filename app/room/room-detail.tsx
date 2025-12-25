@@ -21,6 +21,10 @@ interface HADevice {
   attributes: any;
   brightness?: number;
   temperature?: number;
+  colorTemp?: number; // Current color temp in mireds
+  minColorTemp?: number; // Min mireds (coolest)
+  maxColorTemp?: number;
+  supportsColorTemp?: boolean;
 }
 
 export default function RoomDetailScreen() {
@@ -34,12 +38,10 @@ export default function RoomDetailScreen() {
   const [editMode, setEditMode] = useState(false);
   const [editedRoomName, setEditedRoomName] = useState(roomName as string);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isControllingAll, setIsControllingAll] = useState(false);
 
-  // Use ref to track room entity IDs for event filtering
   const roomEntityIdsRef = useRef<Set<string>>(new Set());
 
-  // Memoized function to create device from entity
+  // ✅ Enhanced to detect color temperature support
   const createDeviceFromEntity = useCallback((entity: any): HADevice => {
     const device: HADevice = {
       entity_id: entity.entity_id,
@@ -48,13 +50,27 @@ export default function RoomDetailScreen() {
       attributes: entity.attributes || {},
     };
 
-    if (
-      entity.entity_id.startsWith("light. ") &&
-      entity.attributes?.brightness
-    ) {
-      device.brightness = Math.round(
-        (entity.attributes.brightness / 255) * 100
-      );
+    if (entity.entity_id.startsWith("light.")) {
+      // Brightness
+      if (entity.attributes?.brightness) {
+        device.brightness = Math.round(
+          (entity.attributes.brightness / 255) * 100
+        );
+      }
+
+      console.log("entity.attributes: ", entity.attributes);
+      const supportedModes = entity.attributes?.supported_color_modes || [];
+      device.supportsColorTemp = supportedModes.includes("color_temp");
+
+      if (device.supportsColorTemp) {
+        device.colorTemp = entity.attributes?.color_temp || 250;
+        device.minColorTemp = entity.attributes?.min_color_temp_kelvin
+          ? Math.round(1000000 / entity.attributes.max_color_temp_kelvin)
+          : entity.attributes?.min_mireds || 153; // ~6500K
+        device.maxColorTemp = entity.attributes?.max_color_temp_kelvin
+          ? Math.round(1000000 / entity.attributes.min_color_temp_kelvin)
+          : entity.attributes?.max_mireds || 500; // ~2000K
+      }
     }
 
     if (
@@ -67,14 +83,12 @@ export default function RoomDetailScreen() {
     return device;
   }, []);
 
-  // Load devices on mount and when connection is established
   useEffect(() => {
     if (isConnected) {
       loadDevices();
     }
   }, [isConnected]);
 
-  // Subscribe to real-time state changes
   useEffect(() => {
     if (!isConnected) return;
 
@@ -109,7 +123,7 @@ export default function RoomDetailScreen() {
           }
         });
       } else if (!newState && oldState) {
-        console.log(`➖ Removing device from room: ${entityId}`);
+        console.log(`➖ Removing device from room:  ${entityId}`);
         setDevices((prevDevices) =>
           prevDevices.filter((d) => d.entity_id !== entityId)
         );
@@ -136,7 +150,7 @@ export default function RoomDetailScreen() {
           const belongsToArea = entry.area_id === roomId;
           const isControllableDevice =
             entry.entity_id.startsWith("light.") ||
-            entry.entity_id.startsWith("switch. ") ||
+            entry.entity_id.startsWith("switch.") ||
             entry.entity_id.startsWith("fan.") ||
             entry.entity_id.startsWith("climate.");
 
@@ -234,49 +248,6 @@ export default function RoomDetailScreen() {
     }
   };
 
-  // ✅ NEW:  Control all devices at once
-  const toggleAllDevices = async (turnOn: boolean) => {
-    if (devices.length === 0) return;
-
-    setIsControllingAll(true);
-
-    try {
-      const service = turnOn ? "turn_on" : "turn_off";
-
-      // Group devices by domain
-      const devicesByDomain = devices.reduce(
-        (acc, device) => {
-          const domain = device.entity_id.split(".")[0];
-          if (!acc[domain]) acc[domain] = [];
-          acc[domain].push(device.entity_id);
-          return acc;
-        },
-        {} as Record<string, string[]>
-      );
-
-      // Send commands for each domain
-      for (const [domain, entityIds] of Object.entries(devicesByDomain)) {
-        await sendMessage({
-          type: "call_service",
-          domain,
-          service,
-          service_data: {
-            entity_id: entityIds,
-          },
-        });
-      }
-
-      console.log(
-        `✅ ${turnOn ? "Turned on" : "Turned off"} all devices in room`
-      );
-    } catch (error) {
-      console.error("Error controlling all devices:", error);
-      Alert.alert("Error", "Failed to control all devices");
-    } finally {
-      setIsControllingAll(false);
-    }
-  };
-
   const updateBrightness = (entity_id: string, value: number) => {
     setDevices((prev) =>
       prev.map((d) =>
@@ -305,6 +276,62 @@ export default function RoomDetailScreen() {
     }
   };
 
+  // ✅ Color temperature control
+  const updateColorTemp = (entity_id: string, value: number) => {
+    setDevices((prev) =>
+      prev.map((d) =>
+        d.entity_id === entity_id ? { ...d, colorTemp: Math.round(value) } : d
+      )
+    );
+  };
+
+  const setColorTemp = async (entity_id: string, miredValue: number) => {
+    try {
+      await sendMessage({
+        type: "call_service",
+        domain: "light",
+        service: "turn_on",
+        service_data: {
+          entity_id,
+          color_temp: Math.round(miredValue),
+        },
+      });
+
+      console.log(`🎨 Set color temp for ${entity_id} to ${miredValue} mireds`);
+    } catch (error) {
+      console.error("Error setting color temperature:", error);
+    }
+  };
+
+  const setColorPreset = async (
+    entity_id: string,
+    preset: "warm" | "neutral" | "cool",
+    minMired: number,
+    maxMired: number
+  ) => {
+    let targetMired: number;
+
+    switch (preset) {
+      case "warm":
+        targetMired = maxMired; // Warmest
+        break;
+      case "cool":
+        targetMired = minMired; // Coolest
+        break;
+      case "neutral":
+        targetMired = Math.round((minMired + maxMired) / 2);
+        break;
+    }
+
+    updateColorTemp(entity_id, targetMired);
+    await setColorTemp(entity_id, targetMired);
+  };
+
+  // Helper:  Convert mireds to Kelvin for display
+  const miredToKelvin = (mired: number): number => {
+    return Math.round(1000000 / mired);
+  };
+
   const handleSaveRoomName = async () => {
     if (!editedRoomName.trim()) {
       Alert.alert("Error", "Room name cannot be empty");
@@ -318,24 +345,21 @@ export default function RoomDetailScreen() {
         name: editedRoomName.trim(),
       });
 
-      console.log(`✅ Updated room name to: ${editedRoomName}`);
+      console.log(`✅ Updated room name to:  ${editedRoomName}`);
       setEditMode(false);
       Alert.alert("Success", "Room name updated successfully!");
     } catch (error) {
       console.error("Error updating room name:", error);
-      Alert.alert("Error", "Failed to update room name.  Please try again.");
+      Alert.alert("Error", "Failed to update room name.");
     }
   };
 
   const handleDeleteRoom = async () => {
     Alert.alert(
       "Delete Room",
-      `Are you sure you want to delete "${roomName}"?  This action cannot be undone.`,
+      `Are you sure you want to delete "${roomName}"?`,
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
@@ -347,12 +371,12 @@ export default function RoomDetailScreen() {
                 area_id: roomId,
               });
 
-              console.log(`🗑️ Deleted room:  ${roomName}`);
+              console.log(`🗑️ Deleted room: ${roomName}`);
               Alert.alert("Success", `Room "${roomName}" deleted! `);
               router.back();
             } catch (error) {
               console.error("Error deleting room:", error);
-              Alert.alert("Error", "Failed to delete room. Please try again.");
+              Alert.alert("Error", "Failed to delete room.");
               setIsDeleting(false);
             }
           },
@@ -365,7 +389,7 @@ export default function RoomDetailScreen() {
     if (entity_id.startsWith("light.")) return "bulb-outline";
     if (entity_id.startsWith("switch.")) return "power-outline";
     if (entity_id.startsWith("fan.")) return "snow-outline";
-    if (entity_id.startsWith("climate. ")) return "thermometer-outline";
+    if (entity_id.startsWith("climate.")) return "thermometer-outline";
     return "cube-outline";
   };
 
@@ -393,8 +417,6 @@ export default function RoomDetailScreen() {
   }
 
   const activeDevices = devices.filter((d) => d.state === "on").length;
-  const allDevicesOn = devices.length > 0 && activeDevices === devices.length;
-  const allDevicesOff = activeDevices === 0;
 
   return (
     <View className="flex-1 bg-gray-50">
@@ -440,20 +462,14 @@ export default function RoomDetailScreen() {
                       <TextInput
                         value={editedRoomName}
                         onChangeText={setEditedRoomName}
-                        className="flex-1 rounded-xl bg-white/30 px-4 pb-2 text-xl font-bold text-white border-2 border-white/50"
+                        className="flex-1 rounded-xl border-2 border-white/50 bg-white/30 px-4 pb-2 text-xl font-bold text-white"
                         placeholderTextColor="#FFFFFF80"
                         placeholder="Room name"
                         onSubmitEditing={handleSaveRoomName}
-                        multiline
-                        numberOfLines={2}
-                        style={{
-                          minHeight: 50,
-                          textAlignVertical: "top",
-                        }}
                       />
                       <TouchableOpacity
                         onPress={handleSaveRoomName}
-                        className="h-12 w-12 items-center justify-center rounded-full bg-white/30 mt-1"
+                        className="mt-1 h-12 w-12 items-center justify-center rounded-full bg-white/30"
                       >
                         <Ionicons name="checkmark" size={24} color="white" />
                       </TouchableOpacity>
@@ -498,65 +514,6 @@ export default function RoomDetailScreen() {
             </View>
           </View>
 
-          {/* ✅ NEW: Control All Buttons */}
-          {/* {devices.length > 0 && (
-            <View className="mb-6 flex-row gap-3">
-              <TouchableOpacity
-                onPress={() => toggleAllDevices(true)}
-                disabled={isControllingAll || allDevicesOn}
-                className={`flex-1 flex-row items-center justify-center gap-2 rounded-2xl py-4 ${
-                  isControllingAll || allDevicesOn
-                    ? "bg-gray-300"
-                    : "bg-green-500"
-                }`}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="power"
-                  size={20}
-                  color={isControllingAll || allDevicesOn ? "#9CA3AF" : "white"}
-                />
-                <Text
-                  className={`text-base font-semibold ${
-                    isControllingAll || allDevicesOn
-                      ? "text-gray-500"
-                      : "text-white"
-                  }`}
-                >
-                  Turn All On
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => toggleAllDevices(false)}
-                disabled={isControllingAll || allDevicesOff}
-                className={`flex-1 flex-row items-center justify-center gap-2 rounded-2xl py-4 ${
-                  isControllingAll || allDevicesOff
-                    ? "bg-gray-300"
-                    : "bg-red-500"
-                }`}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="power-outline"
-                  size={20}
-                  color={
-                    isControllingAll || allDevicesOff ? "#9CA3AF" : "white"
-                  }
-                />
-                <Text
-                  className={`text-base font-semibold ${
-                    isControllingAll || allDevicesOff
-                      ? "text-gray-500"
-                      : "text-white"
-                  }`}
-                >
-                  Turn All Off
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )} */}
-
           {/* Devices Section */}
           <View className="mb-4 flex-row items-center justify-between">
             <Text className="text-xl font-bold text-gray-800">Devices</Text>
@@ -582,6 +539,7 @@ export default function RoomDetailScreen() {
                   key={device.entity_id}
                   className="rounded-[28px] bg-white p-5 shadow-sm"
                 >
+                  {/* Device Header */}
                   <View className="flex-row items-center gap-4">
                     <View
                       className={`h-16 w-16 items-center justify-center rounded-[20px] ${
@@ -598,74 +556,151 @@ export default function RoomDetailScreen() {
                       <Text className="text-lg font-bold text-gray-900">
                         {device.name}
                       </Text>
-                      <Text className="mt-0.5 text-sm text-gray-500 capitalize">
+                      <Text className="mt-0.5 text-sm capitalize text-gray-500">
                         {device.entity_id.split(".")[0]}
+                        {device.supportsColorTemp && " • Dual Color"}
                       </Text>
                     </View>
-                    <View className="items-end gap-2">
-                      <Switch
-                        value={device.state === "on"}
-                        onValueChange={() =>
-                          toggleDevice(device.entity_id, device.state)
-                        }
-                        trackColor={{ false: "#E5E7EB", true: "#0066FF" }}
-                        thumbColor="#FFFFFF"
-                        ios_backgroundColor="#E5E7EB"
-                      />
-                    </View>
+                    <Switch
+                      value={device.state === "on"}
+                      onValueChange={() =>
+                        toggleDevice(device.entity_id, device.state)
+                      }
+                      trackColor={{ false: "#E5E7EB", true: "#0066FF" }}
+                      thumbColor="#FFFFFF"
+                      ios_backgroundColor="#E5E7EB"
+                    />
                   </View>
 
-                  {/* Brightness Slider */}
-                  {device.state === "on" && device.brightness !== undefined && (
-                    <View className="mt-5 flex-row items-center gap-3">
-                      <TouchableOpacity
-                        onPress={() => {
-                          const currentBrightness = device.brightness ?? 0;
-                          const newValue = Math.max(0, currentBrightness - 10);
-                          updateBrightness(device.entity_id, newValue);
-                          setBrightness(device.entity_id, newValue);
-                        }}
-                        className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="remove" size={24} color="#6B7280" />
-                      </TouchableOpacity>
+                  {/* Controls (when device is on) */}
+                  {device.state === "on" && (
+                    <View className="mt-5 gap-4">
+                      {/* Brightness Slider */}
+                      {device.brightness !== undefined && (
+                        <View>
+                          <View className="mb-2 flex-row items-center justify-between">
+                            <View className="flex-row items-center gap-2">
+                              <Ionicons
+                                name="sunny-outline"
+                                size={18}
+                                color="#6B7280"
+                              />
+                              <Text className="text-sm font-semibold text-gray-700">
+                                Brightness
+                              </Text>
+                            </View>
+                            <Text className="text-sm font-bold text-gray-900">
+                              {device.brightness}%
+                            </Text>
+                          </View>
 
-                      <Slider
-                        style={{ flex: 1, height: 40 }}
-                        minimumValue={0}
-                        maximumValue={100}
-                        value={device.brightness ?? 0}
-                        onValueChange={(value) =>
-                          updateBrightness(device.entity_id, value)
-                        }
-                        onSlidingComplete={(value) =>
-                          setBrightness(device.entity_id, value)
-                        }
-                        minimumTrackTintColor="#0066FF"
-                        maximumTrackTintColor="#E5E7EB"
-                        thumbTintColor="#0066FF"
-                      />
+                          <View className="flex-row items-center gap-3">
+                            <TouchableOpacity
+                              onPress={() => {
+                                const newValue = Math.max(
+                                  0,
+                                  (device.brightness ?? 0) - 10
+                                );
+                                updateBrightness(device.entity_id, newValue);
+                                setBrightness(device.entity_id, newValue);
+                              }}
+                              className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
+                            >
+                              <Ionicons
+                                name="remove"
+                                size={20}
+                                color="#6B7280"
+                              />
+                            </TouchableOpacity>
 
-                      <Text className="w-14 text-center text-base font-bold text-gray-600">
-                        {device.brightness ?? 0}%
-                      </Text>
+                            <Slider
+                              style={{ flex: 1, height: 40 }}
+                              minimumValue={0}
+                              maximumValue={100}
+                              value={device.brightness ?? 0}
+                              onValueChange={(value) =>
+                                updateBrightness(device.entity_id, value)
+                              }
+                              onSlidingComplete={(value) =>
+                                setBrightness(device.entity_id, value)
+                              }
+                              minimumTrackTintColor="#0066FF"
+                              maximumTrackTintColor="#E5E7EB"
+                              thumbTintColor="#0066FF"
+                            />
 
-                      <TouchableOpacity
-                        onPress={() => {
-                          const currentBrightness = device.brightness ?? 0;
-                          const newValue = Math.min(
-                            100,
-                            currentBrightness + 10
-                          );
-                          updateBrightness(device.entity_id, newValue);
-                          setBrightness(device.entity_id, newValue);
-                        }}
-                        className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="add" size={24} color="#6B7280" />
-                      </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => {
+                                const newValue = Math.min(
+                                  100,
+                                  (device.brightness ?? 0) + 10
+                                );
+                                updateBrightness(device.entity_id, newValue);
+                                setBrightness(device.entity_id, newValue);
+                              }}
+                              className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
+                            >
+                              <Ionicons name="add" size={20} color="#6B7280" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* ✅ Color Temperature Slider */}
+                      {device.supportsColorTemp &&
+                        device.colorTemp !== undefined && (
+                          <View>
+                            <View className="mt-3 flex-row gap-2">
+                              <TouchableOpacity
+                                onPress={() =>
+                                  setColorPreset(
+                                    device.entity_id,
+                                    "warm",
+                                    device.minColorTemp ?? 153,
+                                    device.maxColorTemp ?? 500
+                                  )
+                                }
+                                className="flex-1 items-center rounded-xl bg-orange-50 py-3"
+                              >
+                                <Text className="text-xs font-bold text-orange-600">
+                                  Warm
+                                </Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() =>
+                                  setColorPreset(
+                                    device.entity_id,
+                                    "neutral",
+                                    device.minColorTemp ?? 153,
+                                    device.maxColorTemp ?? 500
+                                  )
+                                }
+                                className="flex-1 items-center rounded-xl bg-gray-50 py-3"
+                              >
+                                <Text className="text-xs font-bold text-gray-600">
+                                  Neutral
+                                </Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() =>
+                                  setColorPreset(
+                                    device.entity_id,
+                                    "cool",
+                                    device.minColorTemp ?? 153,
+                                    device.maxColorTemp ?? 500
+                                  )
+                                }
+                                className="flex-1 items-center rounded-xl bg-blue-50 py-3"
+                              >
+                                <Text className="text-xs font-bold text-blue-600">
+                                  Cool
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        )}
                     </View>
                   )}
                 </View>
@@ -673,16 +708,14 @@ export default function RoomDetailScreen() {
             </View>
           )}
 
-          {/* Delete Room Button */}
           <TouchableOpacity
             onPress={handleDeleteRoom}
             disabled={isDeleting}
-            className={`mt-8 mb-4 flex-row items-center justify-center gap-2 rounded-2xl px-6 py-4 border-2 ${
+            className={`mb-4 mt-8 flex-row items-center justify-center gap-2 rounded-2xl border-2 px-6 py-4 ${
               isDeleting
-                ? "bg-gray-100 border-gray-300"
-                : "bg-red-50 border-red-200"
+                ? "border-gray-300 bg-gray-100"
+                : "border-red-200 bg-red-50"
             }`}
-            activeOpacity={0.8}
           >
             <Ionicons
               name="trash-outline"

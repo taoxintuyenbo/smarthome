@@ -112,7 +112,6 @@ export default function AddDeviceScreen() {
       // Find ESP devices with factory reset buttons (only available ones)
       const espDevices = states
         .filter((entity: any) => {
-          // Look for button entities with "factory_reset" or "reset" in the name
           if (!entity.entity_id.startsWith("button.")) return false;
 
           // Skip unavailable devices

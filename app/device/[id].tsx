@@ -26,6 +26,10 @@ interface HAArea {
 interface DeviceState {
   state: string;
   brightness?: number;
+  colorTemp?: number; // ✅ NEW
+  minColorTemp?: number; // ✅ NEW
+  maxColorTemp?: number; // ✅ NEW
+  supportsColorTemp?: boolean; // ✅ NEW
   attributes: any;
 }
 
@@ -44,6 +48,12 @@ export default function DeviceDetailScreen() {
   const [brightness, setBrightnessValue] = useState<number | undefined>(
     undefined
   );
+  const [colorTemp, setColorTempValue] = useState<number | undefined>(
+    undefined
+  ); // ✅ NEW
+  const [minColorTemp, setMinColorTemp] = useState<number>(153); // ✅ NEW
+  const [maxColorTemp, setMaxColorTemp] = useState<number>(500); // ✅ NEW
+  const [supportsColorTemp, setSupportsColorTemp] = useState(false); // ✅ NEW
   const [attributes, setAttributes] = useState<any>({});
   const [isLoading, setIsLoading] = useState(true);
   const [currentAreaId, setCurrentAreaId] = useState<string | null>(null);
@@ -52,29 +62,41 @@ export default function DeviceDetailScreen() {
   const [isRoomModalVisible, setIsRoomModalVisible] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
 
-  // Ref to track if this is the initial mount
   const isInitialMount = useRef(true);
 
-  // Memoized function to create device state from entity
+  // ✅ Enhanced to detect color temperature support
   const createDeviceState = useCallback((entity: any): DeviceState => {
     const deviceState: DeviceState = {
       state: entity.state,
       attributes: entity.attributes || {},
     };
 
-    if (
-      entity.entity_id.startsWith("light. ") &&
-      entity.attributes?.brightness
-    ) {
-      deviceState.brightness = Math.round(
-        (entity.attributes.brightness / 255) * 100
-      );
+    if (entity.entity_id.startsWith("light.")) {
+      // Brightness
+      if (entity.attributes?.brightness) {
+        deviceState.brightness = Math.round(
+          (entity.attributes.brightness / 255) * 100
+        );
+      }
+
+      // ✅ Color temperature detection
+      const supportedModes = entity.attributes?.supported_color_modes || [];
+      deviceState.supportsColorTemp = supportedModes.includes("color_temp");
+
+      if (deviceState.supportsColorTemp) {
+        deviceState.colorTemp = entity.attributes?.color_temp || 250;
+        deviceState.minColorTemp = entity.attributes?.min_color_temp_kelvin
+          ? Math.round(1000000 / entity.attributes.max_color_temp_kelvin)
+          : entity.attributes?.min_mireds || 153;
+        deviceState.maxColorTemp = entity.attributes?.max_color_temp_kelvin
+          ? Math.round(1000000 / entity.attributes.min_color_temp_kelvin)
+          : entity.attributes?.max_mireds || 500;
+      }
     }
 
     return deviceState;
   }, []);
 
-  // Load device state on mount
   useEffect(() => {
     if (isConnected) {
       loadDeviceState();
@@ -82,7 +104,6 @@ export default function DeviceDetailScreen() {
     }
   }, [isConnected]);
 
-  // Subscribe to real-time state changes - NO dependencies on state
   useEffect(() => {
     if (!isConnected) return;
 
@@ -105,7 +126,14 @@ export default function DeviceDetailScreen() {
           setBrightnessValue(updatedState.brightness);
         }
 
-        // Update custom name if changed
+        // ✅ Update color temp
+        if (updatedState.supportsColorTemp) {
+          setColorTempValue(updatedState.colorTemp);
+          setMinColorTemp(updatedState.minColorTemp || 153);
+          setMaxColorTemp(updatedState.maxColorTemp || 500);
+          setSupportsColorTemp(true);
+        }
+
         if (newState.attributes?.friendly_name) {
           setCustomName(newState.attributes.friendly_name);
         }
@@ -134,6 +162,14 @@ export default function DeviceDetailScreen() {
           setCustomName(
             deviceState.attributes?.friendly_name || deviceState.entity_id
           );
+
+          // ✅ Set color temp state
+          if (parsedState.supportsColorTemp) {
+            setColorTempValue(parsedState.colorTemp);
+            setMinColorTemp(parsedState.minColorTemp || 153);
+            setMaxColorTemp(parsedState.maxColorTemp || 500);
+            setSupportsColorTemp(true);
+          }
         }
       }
 
@@ -189,7 +225,6 @@ export default function DeviceDetailScreen() {
       }));
 
       setAreas(formattedAreas);
-      console.log("📍 Loaded areas:", formattedAreas.length);
     } catch (error) {
       console.error("Error loading areas:", error);
     }
@@ -225,7 +260,6 @@ export default function DeviceDetailScreen() {
       console.log(`🎛️ Toggled ${entity_id} to ${service}`);
     } catch (error) {
       console.error("Error toggling device:", error);
-      // Revert on error
       setState(previousState);
       setBrightnessValue(previousBrightness);
       Alert.alert("Error", "Failed to toggle device");
@@ -259,6 +293,62 @@ export default function DeviceDetailScreen() {
     }
   };
 
+  // ✅ Color temperature functions
+  const setColorPreset = async (preset: "warm" | "neutral" | "cool") => {
+    let targetMired: number;
+
+    switch (preset) {
+      case "warm":
+        targetMired = maxColorTemp;
+        break;
+      case "cool":
+        targetMired = minColorTemp;
+        break;
+      case "neutral":
+        targetMired = Math.round((minColorTemp + maxColorTemp) / 2);
+        break;
+    }
+
+    setColorTempValue(targetMired);
+
+    try {
+      await sendMessage({
+        type: "call_service",
+        domain: "light",
+        service: "turn_on",
+        service_data: {
+          entity_id,
+          color_temp: Math.round(targetMired),
+          brightness: 255, // Max brightness
+        },
+      });
+
+      // Also update brightness UI
+      setBrightnessValue(100);
+
+      console.log(`🎨 Set ${preset} preset for ${entity_id}`);
+    } catch (error) {
+      console.error("Error setting color temperature:", error);
+      Alert.alert("Error", "Failed to set color temperature");
+    }
+  };
+
+  const miredToKelvin = (mired: number): number => {
+    return Math.round(1000000 / mired);
+  };
+
+  const getCurrentPreset = (): "warm" | "neutral" | "cool" | null => {
+    if (!colorTemp) return null;
+
+    const neutral = Math.round((minColorTemp + maxColorTemp) / 2);
+    const tolerance = 20;
+
+    if (Math.abs(colorTemp - maxColorTemp) < tolerance) return "warm";
+    if (Math.abs(colorTemp - minColorTemp) < tolerance) return "cool";
+    if (Math.abs(colorTemp - neutral) < tolerance) return "neutral";
+    return null;
+  };
+
   const handleSelectRoom = async (area: HAArea | null) => {
     try {
       setIsSaving(true);
@@ -274,11 +364,9 @@ export default function DeviceDetailScreen() {
       setIsRoomModalVisible(false);
 
       console.log(`✅ Updated device area to:  ${area?.name || "None"}`);
-
-      setTimeout(() => {}, 100);
     } catch (error) {
       console.error("Error updating device area:", error);
-      Alert.alert("Error", "Failed to update device room.  Please try again.");
+      Alert.alert("Error", "Failed to update device room.");
     } finally {
       setIsSaving(false);
     }
@@ -299,12 +387,10 @@ export default function DeviceDetailScreen() {
       });
 
       console.log(`✅ Updated device name to:  ${customName.trim()}`);
-
       setEditMode(false);
-      // Silent success
     } catch (error) {
       console.error("Error updating device name:", error);
-      Alert.alert("Error", "Failed to update device name. Please try again.");
+      Alert.alert("Error", "Failed to update device name.");
     } finally {
       setIsSaving(false);
     }
@@ -327,7 +413,6 @@ export default function DeviceDetailScreen() {
 
             await loadDeviceState();
             setEditMode(false);
-            // Silent success
           } catch (error) {
             console.error("Error resetting device name:", error);
             Alert.alert("Error", "Failed to reset device name.");
@@ -364,7 +449,7 @@ export default function DeviceDetailScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-gray-50">
         <ActivityIndicator size="large" color="#0066FF" />
-        <Text className="mt-4 text-gray-500">Loading... </Text>
+        <Text className="mt-4 text-gray-500">Loading...</Text>
       </View>
     );
   }
@@ -376,12 +461,11 @@ export default function DeviceDetailScreen() {
         <Text className="mt-4 text-center text-lg font-semibold text-gray-900">
           Not Connected
         </Text>
-        <Text className="mt-2 text-center text-sm text-gray-500">
-          Connecting to Home Assistant...
-        </Text>
       </View>
     );
   }
+
+  const currentPreset = getCurrentPreset();
 
   return (
     <KeyboardAvoidingView
@@ -433,7 +517,7 @@ export default function DeviceDetailScreen() {
                       <TextInput
                         value={customName}
                         onChangeText={setCustomName}
-                        className="flex-1 rounded-xl bg-white/30 px-4 pb-2 text-xl font-bold text-white border-2 border-white/50"
+                        className="flex-1 rounded-xl border-2 border-white/50 bg-white/30 px-4 pb-2 text-lg font-bold text-white"
                         placeholderTextColor="#FFFFFF80"
                         placeholder="Device name"
                         onSubmitEditing={handleSave}
@@ -447,7 +531,7 @@ export default function DeviceDetailScreen() {
                       <TouchableOpacity
                         onPress={handleSave}
                         disabled={isSaving}
-                        className="h-12 w-12 items-center justify-center rounded-full bg-white/30 mt-1"
+                        className="mt-1 h-12 w-12 items-center justify-center rounded-full bg-white/30"
                       >
                         {isSaving ? (
                           <ActivityIndicator size="small" color="white" />
@@ -457,13 +541,16 @@ export default function DeviceDetailScreen() {
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <Text className="text-xl font-bold text-white">
-                      {customName}
-                    </Text>
+                    <>
+                      <Text className="text-xl font-bold text-white">
+                        {customName}
+                      </Text>
+                      <Text className="mt-1 text-sm capitalize text-white/80">
+                        {entity_id.split(".")[0]}
+                        {supportsColorTemp && " • Dual Color"}
+                      </Text>
+                    </>
                   )}
-                  <Text className="mt-1 text-sm text-white/80 capitalize">
-                    {entity_id.split(".")[0]}
-                  </Text>
                 </View>
                 {!editMode && (
                   <View
@@ -471,7 +558,7 @@ export default function DeviceDetailScreen() {
                       state === "on" ? "bg-green-500" : "bg-gray-400"
                     }`}
                   >
-                    <Text className="text-white text-sm font-semibold">
+                    <Text className="text-sm font-semibold text-white">
                       {getStatusDisplay()}
                     </Text>
                   </View>
@@ -515,48 +602,152 @@ export default function DeviceDetailScreen() {
                 />
               </View>
 
-              {/* Brightness Slider */}
-              {isLight() && state === "on" && brightness !== undefined && (
-                <View className="mt-5 flex-row items-center gap-3">
-                  <TouchableOpacity
-                    onPress={() => {
-                      const newValue = Math.max(0, brightness - 10);
-                      updateBrightness(newValue);
-                      setBrightness(newValue);
-                    }}
-                    className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="remove" size={24} color="#6B7280" />
-                  </TouchableOpacity>
+              {isLight() && state === "on" && (
+                <View className="mt-5 gap-4">
+                  {brightness !== undefined && (
+                    <View>
+                      <View className="mb-2 flex-row items-center justify-between">
+                        <View className="flex-row items-center gap-2">
+                          <Ionicons
+                            name="sunny-outline"
+                            size={18}
+                            color="#6B7280"
+                          />
+                          <Text className="text-sm font-semibold text-gray-700">
+                            Brightness
+                          </Text>
+                        </View>
+                        <Text className="text-sm font-bold text-gray-900">
+                          {brightness}%
+                        </Text>
+                      </View>
 
-                  <Slider
-                    style={{ flex: 1, height: 40 }}
-                    minimumValue={0}
-                    maximumValue={100}
-                    value={brightness}
-                    onValueChange={updateBrightness}
-                    onSlidingComplete={setBrightness}
-                    minimumTrackTintColor="#0066FF"
-                    maximumTrackTintColor="#E5E7EB"
-                    thumbTintColor="#0066FF"
-                  />
+                      <View className="flex-row items-center gap-3">
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newValue = Math.max(0, brightness - 10);
+                            updateBrightness(newValue);
+                            setBrightness(newValue);
+                          }}
+                          className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
+                        >
+                          <Ionicons name="remove" size={20} color="#6B7280" />
+                        </TouchableOpacity>
 
-                  <Text className="w-14 text-center text-base font-bold text-gray-600">
-                    {brightness}%
-                  </Text>
+                        <Slider
+                          style={{ flex: 1, height: 40 }}
+                          minimumValue={0}
+                          maximumValue={100}
+                          value={brightness}
+                          onValueChange={updateBrightness}
+                          onSlidingComplete={setBrightness}
+                          minimumTrackTintColor="#0066FF"
+                          maximumTrackTintColor="#E5E7EB"
+                          thumbTintColor="#0066FF"
+                        />
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      const newValue = Math.min(100, brightness + 10);
-                      updateBrightness(newValue);
-                      setBrightness(newValue);
-                    }}
-                    className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="add" size={24} color="#6B7280" />
-                  </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newValue = Math.min(100, brightness + 10);
+                            updateBrightness(newValue);
+                            setBrightness(newValue);
+                          }}
+                          className="h-10 w-10 items-center justify-center rounded-full bg-gray-100"
+                        >
+                          <Ionicons name="add" size={20} color="#6B7280" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {supportsColorTemp && colorTemp !== undefined && (
+                    <View>
+                      <View className="flex-row gap-2">
+                        <TouchableOpacity
+                          onPress={() => setColorPreset("warm")}
+                          className={`flex-1 items-center rounded-xl py-4 ${
+                            currentPreset === "warm"
+                              ? "bg-orange-500"
+                              : "bg-orange-50"
+                          }`}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="flame"
+                            size={24}
+                            color={
+                              currentPreset === "warm" ? "#FFFFFF" : "#F97316"
+                            }
+                          />
+                          <Text
+                            className={`mt-2 text-xs font-bold ${
+                              currentPreset === "warm"
+                                ? "text-white"
+                                : "text-orange-600"
+                            }`}
+                          >
+                            Warm
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => setColorPreset("neutral")}
+                          className={`flex-1 items-center rounded-xl py-4 ${
+                            currentPreset === "neutral"
+                              ? "bg-gray-700"
+                              : "bg-gray-50"
+                          }`}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="sunny"
+                            size={24}
+                            color={
+                              currentPreset === "neutral"
+                                ? "#FFFFFF"
+                                : "#6B7280"
+                            }
+                          />
+                          <Text
+                            className={`mt-2 text-xs font-bold ${
+                              currentPreset === "neutral"
+                                ? "text-white"
+                                : "text-gray-600"
+                            }`}
+                          >
+                            Neutral
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => setColorPreset("cool")}
+                          className={`flex-1 items-center rounded-xl py-4 ${
+                            currentPreset === "cool"
+                              ? "bg-blue-500"
+                              : "bg-blue-50"
+                          }`}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="snow"
+                            size={24}
+                            color={
+                              currentPreset === "cool" ? "#FFFFFF" : "#0EA5E9"
+                            }
+                          />
+                          <Text
+                            className={`mt-2 text-xs font-bold ${
+                              currentPreset === "cool"
+                                ? "text-white"
+                                : "text-blue-600"
+                            }`}
+                          >
+                            Cool
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -580,7 +771,7 @@ export default function DeviceDetailScreen() {
 
               <View className="flex-row items-center justify-between py-2">
                 <Text className="text-sm text-gray-600">Type</Text>
-                <Text className="text-sm font-semibold text-gray-900 capitalize">
+                <Text className="text-sm font-semibold capitalize text-gray-900">
                   {entity_id.split(".")[0]}
                 </Text>
               </View>

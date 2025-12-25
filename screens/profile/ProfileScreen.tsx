@@ -30,10 +30,7 @@ export default function ProfileScreen() {
                 <Ionicons name="person" size={40} color="white" />
               </View>
               <View className="flex-1">
-                <Text className="text-2xl font-bold text-white">John Doe</Text>
-                <Text className="mt-1 text-sm text-white/90">
-                  user@example.com
-                </Text>
+                <Text className="text-2xl font-bold text-white">Nam Trung</Text>
                 <Text className="mt-0.5 text-xs text-white/80">
                   Member since 2025
                 </Text>

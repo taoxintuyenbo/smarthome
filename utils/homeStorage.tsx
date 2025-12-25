@@ -1,9 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Default configuration
-const DEFAULT_HA_IP = "10.10.1.21:8123";
+const DEFAULT_HA_IP = "ha.namtrung.net:8123";
 const DEFAULT_HA_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI1ZDIxODM1ZDdiMjM0NjIyOWExOTYzYjM2YWYzNGQ0YiIsImlhdCI6MTc2NjIwODE3NiwiZXhwIjoyMDgxNTY4MTc2fQ.1elUqnxYb96wP9IuUSJ7vdJpAawVsC-0ab7jn72CAA8";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkYjFiNTg4MzZmZTE0OWRhODcxZjQxMDJhYWYwNzI3NCIsImlhdCI6MTc2NjU3MzE0NywiZXhwIjoyMDgxOTMzMTQ3fQ.UU3bRlrQp5CmSt7aOL02fUlay5YxTiyevdE5Nvj9_Ko";
 
 const HOMES_KEY = "@homes_data";
 const HA_CONFIG_KEY = "@ha_config";
