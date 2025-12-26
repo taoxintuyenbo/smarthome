@@ -115,8 +115,7 @@ export default function AddDeviceScreen() {
           if (!entity.entity_id.startsWith("button.")) return false;
 
           // Skip unavailable devices
-          if (entity.state === "unavailable" || entity.state === "unknown")
-            return false;
+          if (entity.state === "unavailable") return false;
 
           const name = (
             entity.attributes?.friendly_name || entity.entity_id
@@ -124,8 +123,6 @@ export default function AddDeviceScreen() {
           return name.includes("factory") && name.includes("reset");
         })
         .map((entity: any) => {
-          // Extract device name from button entity
-          // e.g., "button.esp32_test_factory_reset" -> "ESP32 Test"
           const friendlyName = entity.attributes?.friendly_name || "";
           const entityId = entity.entity_id
             .replace("button.", "")
