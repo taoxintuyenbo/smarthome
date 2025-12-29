@@ -390,7 +390,7 @@ export function AddAutomationModal({
     actions: any[]
   ) => {
     try {
-      const baseUrl = HA_CONFIG.URL.replace("ws://", "http://").replace(
+      const baseUrl = HA_CONFIG.URL.replace("wss://", "https://").replace(
         "/api/websocket",
         ""
       );

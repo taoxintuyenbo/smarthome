@@ -1,7 +1,7 @@
 import { HomeStorage } from "@/utils/homeStorage";
 
 let HA_CONFIG = {
-  URL: "ws://ha.namtrung.net:8123/api/websocket",
+  URL: "wss://ha.namtrung.net:8123/api/websocket",
   TOKEN:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkYjFiNTg4MzZmZTE0OWRhODcxZjQxMDJhYWYwNzI3NCIsImlhdCI6MTc2NjU3MzE0NywiZXhwIjoyMDgxOTMzMTQ3fQ.UU3bRlrQp5CmSt7aOL02fUlay5YxTiyevdE5Nvj9_Ko",
 };
@@ -9,7 +9,7 @@ let HA_CONFIG = {
 (async () => {
   const config = await HomeStorage.getHAConfig();
   HA_CONFIG = {
-    URL: `ws://${config.ip}/api/websocket`,
+    URL: `wss://${config.ip}/api/websocket`,
     TOKEN: config.token,
   };
 })();
@@ -17,7 +17,7 @@ let HA_CONFIG = {
 export { HA_CONFIG };
 
 const DEFAULT_HA_CONFIG = {
-  URL: "ws://ha.namtrung.net:8123/api/websocket",
+  URL: "wss://ha.namtrung.net:8123/api/websocket",
   TOKEN:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkYjFiNTg4MzZmZTE0OWRhODcxZjQxMDJhYWYwNzI3NCIsImlhdCI6MTc2NjU3MzE0NywiZXhwIjoyMDgxOTMzMTQ3fQ.UU3bRlrQp5CmSt7aOL02fUlay5YxTiyevdE5Nvj9_Ko",
 } as const;
@@ -40,7 +40,7 @@ export class HomeAssistantWebSocket {
         const url =
           haConfig.ip.startsWith("ws://") || haConfig.ip.startsWith("wss://")
             ? `${haConfig.ip}/api/websocket`
-            : `ws://${haConfig.ip}/api/websocket`;
+            : `wss://${haConfig.ip}/api/websocket`;
 
         const config = {
           url,
@@ -58,7 +58,7 @@ export class HomeAssistantWebSocket {
             activeHome.haIp.startsWith("ws://") ||
             activeHome.haIp.startsWith("wss://")
               ? `${activeHome.haIp}/api/websocket`
-              : `ws://${activeHome.haIp}/api/websocket`;
+              : `wss://${activeHome.haIp}/api/websocket`;
 
           const config = {
             url,

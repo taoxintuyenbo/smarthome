@@ -221,10 +221,10 @@ export default function DeviceScreen() {
           onPress: async () => {
             setIsDeleting(true);
             try {
-              const baseUrl = HA_CONFIG.URL.replace("ws://", "http://").replace(
-                "/api/websocket",
-                ""
-              );
+              const baseUrl = HA_CONFIG.URL.replace(
+                "wss://",
+                "https://"
+              ).replace("/api/websocket", "");
 
               console.log(
                 `🗑️ Deleting automation: ${automation.attributes.id}`
@@ -278,10 +278,10 @@ export default function DeviceScreen() {
           onPress: async () => {
             setIsDeleting(true);
             try {
-              const baseUrl = HA_CONFIG.URL.replace("ws://", "http://").replace(
-                "/api/websocket",
-                ""
-              );
+              const baseUrl = HA_CONFIG.URL.replace(
+                "wss://",
+                "https://"
+              ).replace("/api/websocket", "");
 
               console.log(`🗑️ Deleting ${automations.length} automations...`);
 

@@ -11,7 +11,7 @@ import React, {
 import { AppState, AppStateStatus } from "react-native";
 
 let HA_CONFIG = {
-  URL: "ws://ha.namtrung.net:8123/api/websocket",
+  URL: "wss://ha.namtrung.net:8123/api/websocket",
   TOKEN:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkYjFiNTg4MzZmZTE0OWRhODcxZjQxMDJhYWYwNzI3NCIsImlhdCI6MTc2NjU3MzE0NywiZXhwIjoyMDgxOTMzMTQ3fQ.UU3bRlrQp5CmSt7aOL02fUlay5YxTiyevdE5Nvj9_Ko",
 };
@@ -19,7 +19,7 @@ let HA_CONFIG = {
 (async () => {
   const config = await HomeStorage.getHAConfig();
   HA_CONFIG = {
-    URL: `ws://${config.ip}/api/websocket`,
+    URL: `wss://${config.ip}/api/websocket`,
     TOKEN: config.token,
   };
 })();
@@ -27,7 +27,7 @@ let HA_CONFIG = {
 export { HA_CONFIG };
 
 const DEFAULT_HA_CONFIG = {
-  URL: "ws://ha.namtrung.net:8123/api/websocket",
+  URL: "wss://ha.namtrung.net:8123/api/websocket",
   TOKEN:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkYjFiNTg4MzZmZTE0OWRhODcxZjQxMDJhYWYwNzI3NCIsImlhdCI6MTc2NjU3MzE0NywiZXhwIjoyMDgxOTMzMTQ3fQ.UU3bRlrQp5CmSt7aOL02fUlay5YxTiyevdE5Nvj9_Ko",
 } as const;
@@ -115,11 +115,10 @@ export const HomeAssistantProvider: React.FC<HomeAssistantProviderProps> = ({
       const haConfig = await HomeStorage.getHAConfig();
 
       if (haConfig.ip && haConfig.token) {
-        // Use global HA configuration
         const url =
           haConfig.ip.startsWith("ws://") || haConfig.ip.startsWith("wss://")
             ? `${haConfig.ip}/api/websocket`
-            : `ws://${haConfig.ip}/api/websocket`;
+            : `wss://${haConfig.ip}/api/websocket`;
 
         const newConfig = {
           url,
@@ -138,7 +137,7 @@ export const HomeAssistantProvider: React.FC<HomeAssistantProviderProps> = ({
             activeHome.haIp.startsWith("ws://") ||
             activeHome.haIp.startsWith("wss://")
               ? `${activeHome.haIp}/api/websocket`
-              : `ws://${activeHome.haIp}/api/websocket`;
+              : `wss://${activeHome.haIp}/api/websocket`;
 
           const newConfig = {
             url,
